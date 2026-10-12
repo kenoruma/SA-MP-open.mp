@@ -1,0 +1,68 @@
+
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Sources/**'
+      - 'project.yml'
+      - '.github/workflows/ios-build.yml'
+
+jobs:
+  build:
+    name: Build iOS Simulator
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate --spec project.yml
+
+      - name: Show available schemes
+        run: |
+          xcodebuild -list
+
+      - name: Build for iOS Simulator
+        run: |
+          set -o pipefail
+          SCHEME="$(xcodebuild -list -json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["project"]["schemes"][0])')"
+          xcodebuild \
+            -project *.xcodeproj \
+            -scheme "$SCHEME" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package simulator app
+        run: |
+          mkdir -p output
+          APP_PATH="$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "Simulator app tidak ditemukan."
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" output/SAMPiOS-Simulator.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAMPiOS-Simulator
+          path: output/SAMPiOS-Simulator.zip
+          if-no-files-found: error
