@@ -1,39 +1,87 @@
-
 name: iOS Build
-
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-
 jobs:
   build:
+    name: Build SA-MP iOS
     runs-on: macos-15
-
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-
+        with:
+          submodules: recursive
+      - name: Show Xcode version
+        run: xcodebuild -version
       - name: Install XcodeGen
-        run: brew install xcodegen
-
+        run: |
+          brew install xcodegen
+          xcodegen --version
+      - name: Check project specification
+        run: |
+          if [ ! -f project.yml ]; then
+            echo "ERROR: project.yml tidak ditemukan."
+            echo "Periksa file konfigurasi project di repository."
+            exit 1
+          fi
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
-
-      - name: Build iOS Simulator
+      - name: Find Xcode project
+        id: project
+        run: |
+          PROJECT=$(find . -maxdepth 3 \
+            -name "*.xcodeproj" -type d | head -n 1)
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: Xcode project tidak ditemukan."
+            exit 1
+          fi
+          echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "Project: $PROJECT"
+      - name: List available schemes
         run: |
           xcodebuild \
-            -project SAMPiOS.xcodeproj \
-            -scheme SAMPiOS \
+            -list \
+            -project "${{ steps.project.outputs.project }}"
+      - name: Build iOS Simulator
+        run: |
+          SCHEME=$(xcodebuild \
+            -list \
+            -json \
+            -project "${{ steps.project.outputs.project }}" \
+            | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)
+          schemes=d["project"]["schemes"]
+          print("SAMPiOS" if "SAMPiOS" in schemes else schemes[0])
+          ')
+          echo "Building scheme: $SCHEME"
+          xcodebuild \
+            -project "${{ steps.project.outputs.project }}" \
+            -scheme "$SCHEME" \
             -sdk iphonesimulator \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build
-
-      - name: Upload build
+      - name: Package Simulator app
+        run: |
+          mkdir -p output
+          APP=$(find build/DerivedData/Build/Products \
+            -maxdepth 2 -name "*.app" -type d | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: Hasil .app tidak ditemukan."
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$APP" output/SAMPiOS-Simulator.zip
+          ls -lh output
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: SAMPiOS-Simulator
-          path: ~/Library/Developer/Xcode/DerivedData/**/Build/Products/Debug-iphonesimulator/SAMPiOS.app
+          path: output/SAMPiOS-Simulator.zip
+          if-no-files-found: error
+          retention-days: 7
