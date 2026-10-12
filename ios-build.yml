@@ -1,0 +1,39 @@
+
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build iOS Simulator
+        run: |
+          xcodebuild \
+            -project SAMPiOS.xcodeproj \
+            -scheme SAMPiOS \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAMPiOS-Simulator
+          path: ~/Library/Developer/Xcode/DerivedData/**/Build/Products/Debug-iphonesimulator/SAMPiOS.app
