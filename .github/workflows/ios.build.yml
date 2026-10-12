@@ -1,0 +1,52 @@
+
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build archive
+        run: |
+          set -o pipefail
+          SCHEME="$(xcodebuild -list -json | python3 -c 'import json,sys; print(json.load(sys.stdin)["project"]["schemes"][0])')"
+          xcodebuild \
+            -project "$(find . -maxdepth 1 -name '*.xcodeproj' -print -quit)" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/SAMPiOS.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p output/Payload
+          APP="$(find build/SAMPiOS.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP"
+          cp -R "$APP" output/Payload/
+          cd output
+          zip -r SAMPiOS-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAMPiOS-unsigned-IPA
+          path: output/SAMPiOS-unsigned.ipa
+          if-no-files-found: error
